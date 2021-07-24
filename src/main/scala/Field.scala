@@ -202,17 +202,17 @@ object drawer {
   }
 }
 
-case class Field(val field: Vector[Vector[SquareArt]]) {
+case class Field(field: Vector[Vector[SquareArt]]) {
 
   lazy val yMaxOffest: Int = field.size - 1
 
   lazy val xMaxOffset: Int = field(0).size - 1
 
   final case class Neighbors(
-                              val north: Option[Coordinate],
-                              val south: Option[Coordinate],
-                              val east: Option[Coordinate],
-                              val west: Option[Coordinate]
+                              north: Option[Coordinate],
+                              south: Option[Coordinate],
+                              east: Option[Coordinate],
+                              west: Option[Coordinate]
                             ) {
     def asMap(): Map[Coordinate, Direction] = {
       Map.from(
