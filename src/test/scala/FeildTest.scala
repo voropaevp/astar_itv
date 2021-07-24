@@ -19,15 +19,16 @@ class FieldSpec extends AnyFlatSpec with should.Matchers {
   )
 
   lazy val free_2_2_2_2: Vector[Vector[SquareArt]] = Vector(
-    Vector(Plain, Plain),
+    Vector(RoverTrace, RoverTrace),
     Vector(Plain, RoverSouth)
   )
 
-
+  lazy val field10 = Field.fromUrl(getClass.getResource("/rocks_10x10_2x2.txt")).get
+  lazy val roverService10 = RoverService.initalPosition(field10).get
 
   lazy val field: Field = Field.fromUrl(getClass.getResource("/free_2x2_1x1.txt")).get
 
-  lazy val roverService:RoverService = RoverService.initalPosition(field).get
+  lazy val roverService: RoverService = RoverService.initalPosition(field).get
 
   "Field" should "read from file" in {
     field.field should be(free_2_2_1_1)
@@ -46,7 +47,7 @@ class FieldSpec extends AnyFlatSpec with should.Matchers {
       .flatMap(Forward)
       .flatMap(ClockRotate)
       .flatMap(Forward)
-      .field.field should be (free_2_2_2_2)
+      .field.field should be(free_2_2_2_2)
   }
 
   "Rover" should "go the 1,1 via portals" in {
@@ -56,7 +57,24 @@ class FieldSpec extends AnyFlatSpec with should.Matchers {
       .flatMap(Forward)
       .flatMap(CounterClockRotate)
       .flatMap(Forward)
-      .field.field should be (free_2_2_2_2)
+      .field.field should be(Vector(
+      Vector(RoverTrace, RoverTrace),
+      Vector(Plain, RoverSouth)
+    ))
   }
+
+  "Rover" should "not go over rocks" in {
+    roverService10
+      .flatMap(Forward)
+      .field.field should be(field10.field)
+  }
+
+  "Rover" should "find best path" in {
+    roverService10
+      .flatMap(GoTo(Coordinate(6,6)))
+      .field.field should be(field10.field)
+  }
+
+
 
 }

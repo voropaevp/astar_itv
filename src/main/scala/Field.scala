@@ -60,28 +60,45 @@ object squares {
 
   import direction._
 
-  sealed trait SquareArt
+  sealed trait SquareArt {
+    def toString: String
+  }
 
-  case object Rock extends SquareArt
+  case object Rock extends SquareArt {
+    override def toString: String = "X"
+  }
 
-  case object Plain extends SquareArt
 
-  case object RoverShadow extends SquareArt
+  case object Plain extends SquareArt {
+    override def toString: String = "."
+  }
+
+  case object RoverTrace extends SquareArt {
+    override def toString: String = "o"
+  }
 
   case object RoverNorth extends SquareArt with WithDirection {
     def direction: Direction = North
+
+    override def toString: String = "^"
   }
 
   case object RoverEast extends SquareArt with WithDirection {
     def direction: Direction = East
+
+    override def toString: String = ">"
   }
 
   case object RoverWest extends SquareArt with WithDirection {
     def direction: Direction = West
+
+    override def toString: String = "<"
   }
 
   case object RoverSouth extends SquareArt with WithDirection {
     def direction: Direction = South
+
+    override def toString: String = "\u234C"
   }
 
 
@@ -89,22 +106,12 @@ object squares {
     def apply(string: String): SquareArt = string match {
       case "X" => Rock
       case "." => Plain
-      case "5" => RoverShadow
+      case "o" => RoverTrace
       case ">" => RoverEast
       case "<" => RoverWest
       case "^" => RoverNorth
       case "\u234C" => RoverSouth
       case _ => throw new Exception("unknown square")
-    }
-
-    def unapply(sq: SquareArt): String = sq match {
-      case Rock => "X"
-      case Plain => "."
-      case RoverShadow => "5"
-      case RoverEast => ">"
-      case RoverWest => "<"
-      case RoverNorth => "^"
-      case RoverSouth => "\u234C"
     }
   }
 
@@ -190,6 +197,8 @@ object drawer {
         println(row.fold("")((ac, el) => ac + el.toString))
       )
     }
+
+    println("")
   }
 }
 
@@ -199,24 +208,36 @@ class Field(val field: Vector[Vector[SquareArt]]) {
 
   lazy val xMaxOffset: Int = field(0).size - 1
 
-  final class Neighbors(
-                         val north: Option[Coordinate],
-                         val south: Option[Coordinate],
-                         val east: Option[Coordinate],
-                         val west: Option[Coordinate]
-                       ) {
+  final case class Neighbors(
+                              val north: Option[Coordinate],
+                              val south: Option[Coordinate],
+                              val east: Option[Coordinate],
+                              val west: Option[Coordinate]
+                            ) {
     def asMap(): Map[Coordinate, Direction] = {
-      Map.from(List(
-        north match { case Some(c) => c -> North },
-        south match { case Some(c) => c -> South },
-        east match { case Some(c) => c -> East },
-        west match { case Some(c) => c -> West }
-      ))
+      Map.from(
+        (north match {
+          case Some(c) => Set(c -> North)
+          case None => Set.empty[(Coordinate, Direction)]
+        })
+          ++ (south match {
+          case Some(c) => Set(c -> South)
+          case None => Set.empty[(Coordinate, Direction)]
+        })
+          ++ (east match {
+          case Some(c) => Set(c -> East)
+          case None => Set.empty[(Coordinate, Direction)]
+        })
+          ++ (west match {
+          case Some(c) => Set(c -> East)
+          case None => Set.empty[(Coordinate, Direction)]
+        })
+      )
     }
   }
 
   object Neighbors {
-    def fromCoordinate(coordinate: Coordinate): Neighbors = {
+    def apply(coordinate: Coordinate): Neighbors = {
       val (x, y) = (coordinate.x, coordinate.y)
       val northY: Y = if (y == 0) yMaxOffest else y - 1
       val southY: Y = if (y == yMaxOffest) 0 else y + 1
@@ -224,20 +245,20 @@ class Field(val field: Vector[Vector[SquareArt]]) {
       val eastX: X = if (x == xMaxOffset) 0 else x + 1
 
 
-      new Neighbors(if (field(x)(northY) == Rock) None else Some(Coordinate(x, northY)),
-        if (field(x)(southY) == Rock) None else Some(Coordinate(x, southY)),
-        if (field(eastX)(y) == Rock) None else Some(Coordinate(eastX, y)),
-        if (field(westX)(y) == Rock) None else Some(Coordinate(westX, y)))
+      Neighbors(if (field(northY)(x) == Rock) None else Some(Coordinate(x, northY)),
+        if (field(southY)(x) == Rock) None else Some(Coordinate(x, southY)),
+        if (field(y)(eastX) == Rock) None else Some(Coordinate(eastX, y)),
+        if (field(y)(westX) == Rock) None else Some(Coordinate(westX, y)))
     }
   }
 
   def move(from: RoverState, to: RoverState): Try[Field] = Try {
-    field(to.coordinate.x)(to.coordinate.y) match {
+    field(to.coordinate.y)(to.coordinate.x) match {
       case Rock => throw new Exception(s"Emergency stop to avoid rock collision at ${to.coordinate.x},${to.coordinate.y}")
       case _ =>
-        val f: Vector[Vector[SquareArt]] = field.updated(from.coordinate.x, field(from.coordinate.x).updated(from.coordinate.y, Plain))
-        val out: Vector[Vector[SquareArt]] = f.updated(to.coordinate.x, f(to.coordinate.x).updated(to.coordinate.y, to.asSquareArt()))
-        new Field(out)
+        val f: Vector[Vector[SquareArt]] = field.updated(from.coordinate.y, field(from.coordinate.y).updated(from.coordinate.x, RoverTrace))
+        val out: Vector[Vector[SquareArt]] = f.updated(to.coordinate.y, f(to.coordinate.y).updated(to.coordinate.x, to.asSquareArt()))
+        Field(out)
     }
   }
 
@@ -245,7 +266,7 @@ class Field(val field: Vector[Vector[SquareArt]]) {
   lazy val edges: Map[Coordinate, Neighbors] = (for {
     (row, y: Y) <- field.zipWithIndex
     (_, x: X) <- row.zipWithIndex
-  } yield (Coordinate(x, y), Neighbors.fromCoordinate(Coordinate(x, y)))).toMap
+  } yield (Coordinate(x, y), Neighbors(Coordinate(x, y)))).toMap
 
 
   def heuristic(squareCoordinate: Coordinate, destCoordinate: Coordinate): Eval[Double] = Eval.later {
@@ -320,7 +341,7 @@ class Field(val field: Vector[Vector[SquareArt]]) {
       if (current.coordinate == destinationCoordinate) {
         return Some(reconstructPath(cameFrom.toMap, current))
       }
-      val nbr = Neighbors.fromCoordinate(current.coordinate).asMap()
+      val nbr = Neighbors(current.coordinate).asMap()
       val candidateNbrs = nbr.keys.toSet
       candidateNbrs.foreach { nbrCoordinate =>
         val nbrDirection = nbr(nbrCoordinate)
@@ -330,12 +351,14 @@ class Field(val field: Vector[Vector[SquareArt]]) {
           this.heuristic(current.coordinate, nbrCoordinate).value,
           current.direction.cost(nbrDirection).toDouble + gScore.getOrElse(current.coordinate, 0.toDouble)
         )
+        // tentative_gScore is the distance from start to the neighbor through current
         val tentative_gScore = gScore(current.coordinate) + nextAstarRover.gCost
         if (tentative_gScore < gScore.getOrElse(nextAstarRover.coordinate, Double.PositiveInfinity)) {
+          // This path to neighbor is better than any previous one. Record it!
           cameFrom(nbrCoordinate) = current
           gScore(nbrCoordinate) = tentative_gScore
           fScore(nbrCoordinate) = gScore(nbrCoordinate) + nextAstarRover.hCost
-          if (openQueue.toQueue.contains(nextAstarRover)) {
+          if (!openQueue.toQueue.contains(nextAstarRover)) {
             openQueue.enqueue(nextAstarRover)
           }
         }
@@ -383,7 +406,7 @@ object RoverService {
   } yield square match {
     case Rock => None
     case Plain => None
-    case RoverShadow => None
+    case RoverTrace => None
     case RoverNorth => Some(RoverState(Coordinate(x, y), North))
     case RoverEast => Some(RoverState(Coordinate(x, y), East))
     case RoverWest => Some(RoverState(Coordinate(x, y), West))
@@ -398,56 +421,70 @@ object RoverService {
 
 case class RoverService(roverState: RoverState, field: Field) {
 
-  def flatMap(cmd: Command): RoverService = sendCommand(cmd) match {
-    case Some(to) => RoverService(to, field.move(roverState, to).get)
-    case None => this
+  @tailrec
+  final def runManyCommands(rs: RoverService, cmdLeft: List[Command]): RoverService = cmdLeft match {
+    case head :: cmds => runManyCommands(rs.flatMap(head), cmds)
+    case _ => this
   }
 
-  def sendCommand(cmd: Command): Option[RoverState] = cmd match {
-    case GoTo(coordinate) => field.astar(roverState, coordinate) match {
-      case Some(commands) => commands.map(cmd => sendCommand(cmd)).tail(1)
-      case None =>
-        println("Unreachable terrain")
-        None
-    }
-    case Forward => roverState.direction match {
-      case North => field.edges(roverState.coordinate).north match {
-        case Some(coordinate) => Some(RoverState(coordinate, roverState.direction))
+  def flatMap(cmd: Command): RoverService = {
+    cmd match {
+      case GoTo(coordinate) => field.astar(roverState, coordinate) match {
+        case Some(commands) => runManyCommands(this, commands)
         case None =>
-          println("Unreachable terrain")
-          None
+          println("Unreachable destination")
+          this
       }
-      case East => field.edges(roverState.coordinate).east match {
-        case Some(coordinate) => Some(RoverState(coordinate, roverState.direction))
-        case None =>
-          println("Unreachable terrain")
-          None
-      }
-      case West => field.edges(roverState.coordinate).west match {
-        case Some(coordinate) => Some(RoverState(coordinate, roverState.direction))
-        case None =>
-          println("Unreachable terrain")
-          None
-      }
-      case South => field.edges(roverState.coordinate).south match {
-        case Some(coordinate) => Some(RoverState(coordinate, roverState.direction))
-        case None =>
-          println("Unreachable terrain")
-          None
+      case _ => sendSimpleCommand(cmd)
+      match {
+        case Some(to) => RoverService(to, field.move(roverState, to).get)
+        case None => this
       }
     }
-    case ClockRotate => Some(roverState.direction match {
-      case North => RoverState(roverState.coordinate, East)
-      case East => RoverState(roverState.coordinate, South)
-      case South => RoverState(roverState.coordinate, West)
-      case West => RoverState(roverState.coordinate, North)
-    })
-    case CounterClockRotate => Some(roverState.direction match {
-      case North => RoverState(roverState.coordinate, West)
-      case East => RoverState(roverState.coordinate, North)
-      case South => RoverState(roverState.coordinate, East)
-      case West => RoverState(roverState.coordinate, South)
-    })
+  }
+
+  def sendSimpleCommand(cmd: Command): Option[RoverState] = {
+    println(cmd)
+    cmd match {
+      case Forward => roverState.direction match {
+        case North => field.edges(roverState.coordinate).north match {
+          case Some(coordinate) => Some(RoverState(coordinate, roverState.direction))
+          case None =>
+            println("Unreachable terrain")
+            None
+        }
+        case East => field.edges(roverState.coordinate).east match {
+          case Some(coordinate) => Some(RoverState(coordinate, roverState.direction))
+          case None =>
+            println("Unreachable terrain")
+            None
+        }
+        case West => field.edges(roverState.coordinate).west match {
+          case Some(coordinate) => Some(RoverState(coordinate, roverState.direction))
+          case None =>
+            println("Unreachable terrain")
+            None
+        }
+        case South => field.edges(roverState.coordinate).south match {
+          case Some(coordinate) => Some(RoverState(coordinate, roverState.direction))
+          case None =>
+            println("Unreachable terrain")
+            None
+        }
+      }
+      case ClockRotate => Some(roverState.direction match {
+        case North => RoverState(roverState.coordinate, East)
+        case East => RoverState(roverState.coordinate, South)
+        case South => RoverState(roverState.coordinate, West)
+        case West => RoverState(roverState.coordinate, North)
+      })
+      case CounterClockRotate => Some(roverState.direction match {
+        case North => RoverState(roverState.coordinate, West)
+        case East => RoverState(roverState.coordinate, North)
+        case South => RoverState(roverState.coordinate, East)
+        case West => RoverState(roverState.coordinate, South)
+      })
+    }
   }
 }
 
