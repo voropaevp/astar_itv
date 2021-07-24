@@ -2,7 +2,7 @@ import cats._
 
 import scala.annotation.tailrec
 import scala.io.Source
-import util.{Failure, Try, Using}
+import util.{Failure, Success, Try, Using}
 import scala.collection.immutable._
 import scala.collection.mutable
 import java.net.URL
@@ -136,8 +136,8 @@ object direction {
 
     def moveInstructions(newDirection: Direction): List[Command] = newDirection match {
       case North => List(ClockRotate, ClockRotate, Forward)
-      case East => List(ClockRotate, Forward)
-      case West => List(CounterClockRotate, Forward)
+      case East => List(CounterClockRotate, Forward)
+      case West => List(ClockRotate, Forward)
       case South => List(Forward)
     }
   }
@@ -146,8 +146,8 @@ object direction {
 
     def moveInstructions(newDirection: Direction): List[Command] = newDirection match {
       case North => List(Forward)
-      case East => List(CounterClockRotate, Forward)
-      case West => List(ClockRotate, Forward)
+      case East => List(ClockRotate, Forward)
+      case West => List(CounterClockRotate, Forward)
       case South => List(ClockRotate, ClockRotate, Forward)
     }
   }
@@ -155,20 +155,20 @@ object direction {
   case object East extends Direction {
 
     def moveInstructions(newDirection: Direction): List[Command] = newDirection match {
-      case North => List(ClockRotate, Forward)
+      case North => List(CounterClockRotate, Forward)
       case East => List(Forward)
       case West => List(ClockRotate, ClockRotate, Forward)
-      case South => List(CounterClockRotate, Forward)
+      case South => List(ClockRotate, Forward)
     }
   }
 
   case object West extends Direction {
 
     def moveInstructions(newDirection: Direction): List[Command] = newDirection match {
-      case North => List(CounterClockRotate, Forward)
+      case North => List(ClockRotate, Forward)
       case East => List(ClockRotate, ClockRotate, Forward)
       case West => List(Forward)
-      case South => List(ClockRotate, Forward)
+      case South => List(CounterClockRotate, Forward)
     }
   }
 
@@ -202,7 +202,7 @@ object drawer {
   }
 }
 
-class Field(val field: Vector[Vector[SquareArt]]) {
+case class Field(val field: Vector[Vector[SquareArt]]) {
 
   lazy val yMaxOffest: Int = field.size - 1
 
@@ -229,7 +229,7 @@ class Field(val field: Vector[Vector[SquareArt]]) {
           case None => Set.empty[(Coordinate, Direction)]
         })
           ++ (west match {
-          case Some(c) => Set(c -> East)
+          case Some(c) => Set(c -> West)
           case None => Set.empty[(Coordinate, Direction)]
         })
       )
@@ -269,72 +269,88 @@ class Field(val field: Vector[Vector[SquareArt]]) {
   } yield (Coordinate(x, y), Neighbors(Coordinate(x, y)))).toMap
 
 
-  def heuristic(squareCoordinate: Coordinate, destCoordinate: Coordinate): Eval[Double] = Eval.later {
+  private def heuristic(squareCoordinate: Coordinate, destCoordinate: Coordinate): Eval[Double] = Eval.later {
     val (x, y) = (squareCoordinate.x, squareCoordinate.y)
     val (destX, destY) = (destCoordinate.x, destCoordinate.y)
-    List(
+    val h = List(
       (x - destX, y - destY),
-      (x - destX, y - destY + yMaxOffest),
-      (x - destX, y - destY - yMaxOffest),
-      (x - destX + xMaxOffset, y - destY),
-      (x - destX - xMaxOffset, y - destY),
-      (x - destX + xMaxOffset, y - destY - yMaxOffest),
-      (x - destX - xMaxOffset, y - destY - yMaxOffest),
-      (x - destX + xMaxOffset, y - destY + yMaxOffest),
-      (x - destX - xMaxOffset, y - destY + yMaxOffest))
+      (x - destX, y - (yMaxOffest - destY)),
+      (x - destX, (yMaxOffest - y) - destY),
+      ((xMaxOffset - x) - destX, y - destY),
+      (x - (xMaxOffset - destX), y - destY),
+      ((xMaxOffset - x) - destX, (yMaxOffest - y) - destY),
+      (x - (xMaxOffset - destX), (yMaxOffest - y) - destY),
+      ((xMaxOffset - x) - destX, y - (yMaxOffest - destY)),
+      (x - (xMaxOffset - destX), y - (yMaxOffest - destY))
+    )
       .map { case (x, y) => math.sqrt(x * x + y * y) }
-      .max
+      .min
+    h
   }
 
-  trait WithAStarMetrics extends Ordered[WithAStarMetrics] {
+  private trait WithAStarMetrics extends Ordered[WithAStarMetrics] {
     def hCost: Double
 
     def gCost: Double
 
     def fCost: Double = hCost + gCost
 
-    override def compare(that: WithAStarMetrics): Int = this.fCost compare that.fCost
+    override def compare(that: WithAStarMetrics): Int = that.fCost compare this.fCost
   }
 
-  private case class AstarRoverOnField(coordinate: Coordinate, direction: Direction, hCost: Double, gCost: Double)
+  private case class AstarRoverState(coordinate: Coordinate, direction: Direction, hCost: Double, gCost: Double)
     extends WithDirection
       with WithCoordinate
-      with WithAStarMetrics
+      with WithAStarMetrics {
 
+    override def equals(obj: Any): Boolean = obj match {
+      case that: AstarRoverState => this.coordinate == that.coordinate & this.direction == that.direction
+      case _ => false
+    }
 
-  def reconstructPath(cameFrom: Map[Coordinate, AstarRoverOnField], current: AstarRoverOnField): List[Command] = {
-    @tailrec
-    def iter(roverOnField: AstarRoverOnField, acc: List[Command]): List[Command] =
-      cameFrom.get(roverOnField.coordinate) match {
-        case Some(oldRoverOnField) => iter(
-          oldRoverOnField,
-          oldRoverOnField.direction.moveInstructions(roverOnField.direction) ++ acc
-        )
-        case None => acc
-      }
+    override def hashCode(): Y = coordinate.hashCode() ^ direction.hashCode()
 
-    iter(current, List[Command]())
   }
 
-  def astar(roverOnField: RoverState, destinationCoordinate: Coordinate): Option[List[Command]] = {
 
-    val openQueue: mutable.PriorityQueue[AstarRoverOnField] = mutable.PriorityQueue[AstarRoverOnField](
-      AstarRoverOnField(
-        roverOnField.coordinate,
-        roverOnField.direction,
-        this.heuristic(roverOnField.coordinate, destinationCoordinate).value,
-        0
-      )
+  private def reconstructPath(cameFrom: Map[AstarRoverState, AstarRoverState], current: AstarRoverState): List[Command] = {
+    @tailrec
+    def iter(astarRoverState: AstarRoverState, acc: List[Command], acc2: List[Coordinate]): (List[Command], List[Coordinate]) =
+      cameFrom.get(astarRoverState) match {
+        case Some(oldRoverOnField) =>
+          //          println(s"${oldRoverOnField.direction} ${astarRoverState.direction} ${oldRoverOnField.direction.moveInstructions(astarRoverState.direction)}")
+          iter(
+            oldRoverOnField,
+            oldRoverOnField.direction.moveInstructions(astarRoverState.direction) ++ acc,
+            astarRoverState.coordinate :: acc2
+          )
+        case None => (acc, acc2)
+      }
+
+    val z = iter(current, List[Command](), List[Coordinate]())
+    //    z._2.foreach(println)
+    z._1
+  }
+
+  def astar(roverState: RoverState, destinationCoordinate: Coordinate): Option[List[Command]] = {
+
+    val initRoverState = AstarRoverState(
+      roverState.coordinate,
+      roverState.direction,
+      this.heuristic(roverState.coordinate, destinationCoordinate).value,
+      0
+    )
+
+    val openQueue: mutable.PriorityQueue[AstarRoverState] = mutable.PriorityQueue[AstarRoverState](initRoverState)
+
+
+    val gScore: mutable.Map[AstarRoverState, Double] = mutable.Map(initRoverState -> 0.toDouble)
+    val fScore: mutable.Map[AstarRoverState, Double] = mutable.Map(
+      initRoverState -> this.heuristic(roverState.coordinate, destinationCoordinate).value
     )
 
 
-    val gScore: mutable.Map[Coordinate, Double] = mutable.Map(roverOnField.coordinate -> 0.toDouble)
-    val fScore: mutable.Map[Coordinate, Double] = mutable.Map(
-      roverOnField.coordinate -> this.heuristic(roverOnField.coordinate, destinationCoordinate).value
-    )
-
-
-    val cameFrom = mutable.Map[Coordinate, AstarRoverOnField]()
+    val cameFrom = mutable.Map[AstarRoverState, AstarRoverState]()
 
     while (openQueue.nonEmpty) {
       val current = openQueue.dequeue()
@@ -345,21 +361,21 @@ class Field(val field: Vector[Vector[SquareArt]]) {
       val candidateNbrs = nbr.keys.toSet
       candidateNbrs.foreach { nbrCoordinate =>
         val nbrDirection = nbr(nbrCoordinate)
-        val nextAstarRover = AstarRoverOnField(
+        val neighbor = AstarRoverState(
           nbrCoordinate,
           nbrDirection,
-          this.heuristic(current.coordinate, nbrCoordinate).value,
-          current.direction.cost(nbrDirection).toDouble + gScore.getOrElse(current.coordinate, 0.toDouble)
+          this.heuristic(current.coordinate, destinationCoordinate).value,
+          current.direction.cost(nbrDirection).toDouble + gScore.getOrElse(current, 0.toDouble)
         )
         // tentative_gScore is the distance from start to the neighbor through current
-        val tentative_gScore = gScore(current.coordinate) + nextAstarRover.gCost
-        if (tentative_gScore < gScore.getOrElse(nextAstarRover.coordinate, Double.PositiveInfinity)) {
+        val tentative_gScore = gScore(current) + neighbor.gCost
+        if (tentative_gScore < gScore.getOrElse(neighbor, Double.PositiveInfinity)) {
           // This path to neighbor is better than any previous one. Record it!
-          cameFrom(nbrCoordinate) = current
-          gScore(nbrCoordinate) = tentative_gScore
-          fScore(nbrCoordinate) = gScore(nbrCoordinate) + nextAstarRover.hCost
-          if (!openQueue.toQueue.contains(nextAstarRover)) {
-            openQueue.enqueue(nextAstarRover)
+          cameFrom(neighbor) = current
+          gScore(neighbor) = tentative_gScore
+          fScore(neighbor) = gScore(neighbor) + neighbor.hCost
+          if (!openQueue.toQueue.contains(neighbor)) {
+            openQueue.enqueue(neighbor)
           }
         }
       }
@@ -372,34 +388,31 @@ class Field(val field: Vector[Vector[SquareArt]]) {
 
 object Field {
 
-  import drawer._
-
-  def apply(field: Vector[Vector[SquareArt]]): Field = {
-    val d = new Field(field)
-    d.draw()
-    d
+  private def validateSize(field: Vector[Vector[SquareArt]]): Try[Vector[Vector[SquareArt]]] = {
+    if (field.size > 1) {
+      if (field.forall(_.size == field.head.size))
+        Success(field)
+      else
+        Failure(new Exception("Fields rows vary in size"))
+    } else {
+      Failure(new Exception("field is too small"))
+    }
   }
-
-
-  def fromFile(path: String): Try[Field] =
-    Using(Source.fromFile(path)) {
-      _.getLines()
-        .map(_.split("").map(SquareArt.apply).toVector)
-        .toVector
-    }.map(Field.apply)
 
   def fromUrl(url: URL): Try[Field] = {
     Using(Source.fromURL(url)) {
       _.getLines()
         .map(_.split("").map(SquareArt.apply).toVector)
         .toVector
-    }.map(Field.apply)
+    }
+      .flatMap(validateSize)
+      .map(Field.apply)
   }
 }
 
 
 object RoverService {
-  def initalPosition(field: Field): Option[RoverService] = (for {
+  def initialPosition(field: Field): Option[RoverService] = (for {
     (row, y) <- field.field.zipWithIndex
     (square, x) <- row.zipWithIndex
     if square.isInstanceOf[WithDirection]
@@ -422,12 +435,13 @@ object RoverService {
 case class RoverService(roverState: RoverState, field: Field) {
 
   @tailrec
-  final def runManyCommands(rs: RoverService, cmdLeft: List[Command]): RoverService = cmdLeft match {
+  private def runManyCommands(rs: RoverService, cmdLeft: List[Command]): RoverService = cmdLeft match {
     case head :: cmds => runManyCommands(rs.flatMap(head), cmds)
-    case _ => this
+    case _ => rs
   }
 
   def flatMap(cmd: Command): RoverService = {
+
     cmd match {
       case GoTo(coordinate) => field.astar(roverState, coordinate) match {
         case Some(commands) => runManyCommands(this, commands)
