@@ -4,11 +4,11 @@ import scala.annotation.tailrec
 import scala.io.Source
 import util.{Failure, Success, Try, Using}
 import scala.collection.immutable._
-import scala.collection.mutable
 import java.net.URL
 import scala.util.matching.Regex
 
 object coordinate {
+  // Base types for the field coordinates
   type X = Int
   type Y = Int
 
@@ -20,6 +20,9 @@ object coordinate {
 }
 
 object roverCommands {
+  // Rover Commands
+
+  //goto requires coordinates
 
   import coordinate._
 
@@ -57,6 +60,7 @@ object roverCommands {
 
 
 object squares {
+  // All unique squares that can exist in the field
 
   import direction._
 
@@ -119,17 +123,20 @@ object squares {
 
 
 object direction {
+  // 4 direction rover could be facing
 
   import roverCommands._
 
-  trait WithDirection {
-    def direction: Direction
-  }
-
   sealed trait Direction {
+    // Cost of moving, used as part of G in A* calculation. Each command has equal cost.
     def cost(newDirection: Direction): Int = moveInstructions(newDirection).size
 
+    // List of instruction required to one square in newDirection
     def moveInstructions(newDirection: Direction): List[Command]
+  }
+
+  trait WithDirection {
+    def direction: Direction
   }
 
   case object South extends Direction {
@@ -180,9 +187,15 @@ import direction._
 import coordinate._
 import roverCommands._
 
-
+/**
+ *
+ * @param coordinate - current coordinates
+ * @param direction - where rover is facing
+ *
+ * art
+ */
 case class RoverState(coordinate: Coordinate, direction: Direction) {
-  def asSquareArt(): SquareArt = direction match {
+  lazy val art: SquareArt = direction match {
     case South => RoverSouth
     case North => RoverNorth
     case East => RoverEast
@@ -191,6 +204,7 @@ case class RoverState(coordinate: Coordinate, direction: Direction) {
 }
 
 object drawer {
+  // Helper class to render the field state in console
   implicit class Drawer(f: Field) {
     def draw(): Unit = {
       f.field.foreach(row =>
@@ -202,18 +216,34 @@ object drawer {
   }
 }
 
+/** Holds the current off all squares. Has to be rectangular in shape.
+ *
+ *  @param field - tensor with the squares
+ *
+ **/
 case class Field(field: Vector[Vector[SquareArt]]) {
 
-  lazy val yMaxOffest: Int = field.size - 1
+  private lazy val yMaxOffset: Int = field.size - 1
 
-  lazy val xMaxOffset: Int = field(0).size - 1
+  private  lazy val xMaxOffset: Int = field(0).size - 1
 
-  final case class Neighbors(
+  /** Square neighbors commute destination
+   *
+   * @param north - Going north will move rover to coordinate, None is for not commutable
+   * @param south - Going south will move rover to coordinate, None is for not commutable
+   * @param east - Going east will move rover to coordinate, None is for not commutable
+   * @param west - Going west will move rover to coordinate, None is for not commutable
+   */
+
+  private final case class Neighbors(
                               north: Option[Coordinate],
                               south: Option[Coordinate],
                               east: Option[Coordinate],
                               west: Option[Coordinate]
                             ) {
+    /** Used by A*
+     * @return - map from coordinates to their origin direction
+     */
     def asMap(): Map[Coordinate, Direction] = {
       Map.from(
         (north match {
@@ -236,11 +266,17 @@ case class Field(field: Vector[Vector[SquareArt]]) {
     }
   }
 
-  object Neighbors {
+  private object Neighbors {
+    /** Factory for making neighbor nodes.
+     *  Teleportation is handled here.
+     *
+     * @param coordinate - commute origin
+     * @return neighbor nodes
+     */
     def apply(coordinate: Coordinate): Neighbors = {
       val (x, y) = (coordinate.x, coordinate.y)
-      val northY: Y = if (y == 0) yMaxOffest else y - 1
-      val southY: Y = if (y == yMaxOffest) 0 else y + 1
+      val northY: Y = if (y == 0) yMaxOffset else y - 1
+      val southY: Y = if (y == yMaxOffset) 0 else y + 1
       val westX: X = if (x == 0) xMaxOffset else x - 1
       val eastX: X = if (x == xMaxOffset) 0 else x + 1
 
@@ -252,42 +288,64 @@ case class Field(field: Vector[Vector[SquareArt]]) {
     }
   }
 
+  /** Changes field state by moving the rover
+   *  Leaves trail where rover was.
+   *
+   * @param from initial rover state
+   * @param to destination rover state
+   * @throws Exception if `to` is a [[Rock]]
+   * @return new filed wrapped in Try.
+   */
   def move(from: RoverState, to: RoverState): Try[Field] = Try {
     field(to.coordinate.y)(to.coordinate.x) match {
       case Rock => throw new Exception(s"Emergency stop to avoid rock collision at ${to.coordinate.x},${to.coordinate.y}")
       case _ =>
         val f: Vector[Vector[SquareArt]] = field.updated(from.coordinate.y, field(from.coordinate.y).updated(from.coordinate.x, RoverTrace))
-        val out: Vector[Vector[SquareArt]] = f.updated(to.coordinate.y, f(to.coordinate.y).updated(to.coordinate.x, to.asSquareArt()))
+        val out: Vector[Vector[SquareArt]] = f.updated(to.coordinate.y, f(to.coordinate.y).updated(to.coordinate.x, to.art))
         Field(out)
     }
   }
 
-
+  /** Commute graph from [[Coordinate]] to its' [[Neighbors]]
+   */
   lazy val edges: Map[Coordinate, Neighbors] = (for {
     (row, y: Y) <- field.zipWithIndex
     (_, x: X) <- row.zipWithIndex
   } yield (Coordinate(x, y), Neighbors(Coordinate(x, y)))).toMap
 
+  /** h in A*
+   * In addition to euclidean space, also calculates projections over 4 edges and 4 corners. Takes the minimum.
+   * Memorized with [[Eval]]
+   *
+   * @param squareCoordinate origin square
+   * @param destCoordinate end point in A*
+   * @return
+   */
 
   private def heuristic(squareCoordinate: Coordinate, destCoordinate: Coordinate): Eval[Double] = Eval.later {
     val (x, y) = (squareCoordinate.x, squareCoordinate.y)
     val (destX, destY) = (destCoordinate.x, destCoordinate.y)
     val h = List(
       (x - destX, y - destY),
-      (x - destX, y - (yMaxOffest - destY)),
-      (x - destX, (yMaxOffest - y) - destY),
+      (x - destX, y - (yMaxOffset - destY)),
+      (x - destX, (yMaxOffset - y) - destY),
       ((xMaxOffset - x) - destX, y - destY),
       (x - (xMaxOffset - destX), y - destY),
-      ((xMaxOffset - x) - destX, (yMaxOffest - y) - destY),
-      (x - (xMaxOffset - destX), (yMaxOffest - y) - destY),
-      ((xMaxOffset - x) - destX, y - (yMaxOffest - destY)),
-      (x - (xMaxOffset - destX), y - (yMaxOffest - destY))
+      ((xMaxOffset - x) - destX, (yMaxOffset - y) - destY),
+      (x - (xMaxOffset - destX), (yMaxOffset - y) - destY),
+      ((xMaxOffset - x) - destX, y - (yMaxOffset - destY)),
+      (x - (xMaxOffset - destX), y - (yMaxOffset - destY))
     )
       .map { case (x, y) => math.sqrt(x * x + y * y) }
       .min
     h
   }
 
+  /** A* cost machinery
+   *  hCost - heuristics from node to destination
+   *  gCost - cost of reaching this node
+   *  fCost - sum of above, cheapest fCost nodes evaluated first. Hence ascending order via compare.
+   */
   private trait WithAStarMetrics extends Ordered[WithAStarMetrics] {
     def hCost: Double
 
@@ -298,6 +356,15 @@ case class Field(field: Vector[Vector[SquareArt]]) {
     override def compare(that: WithAStarMetrics): Int = that.fCost compare this.fCost
   }
 
+  /** A* graph node
+   *
+   *  Avoids duplication in queue by using custom hashCode and equals based on direction and coordinate.
+   *
+   * @param coordinate - coordinate on field
+   * @param direction - where rover is facing
+   * @param hCost - heuristics from node to destination
+   * @param gCost - cost of reaching this node
+   */
   private case class AstarRoverState(coordinate: Coordinate, direction: Direction, hCost: Double, gCost: Double)
     extends WithDirection
       with WithCoordinate
@@ -312,13 +379,17 @@ case class Field(field: Vector[Vector[SquareArt]]) {
 
   }
 
-
+  /** A* path collection. Unravels A* commute map starting from destination
+   *
+   * @param cameFrom full commute map that A* before it found the solution.
+   * @param current Would be destination all the time, not that it is not just the coordinate but also direction.
+   * @return List of [[Command]] to reach the destination
+   */
   private def reconstructPath(cameFrom: Map[AstarRoverState, AstarRoverState], current: AstarRoverState): List[Command] = {
     @tailrec
     def iter(astarRoverState: AstarRoverState, acc: List[Command], acc2: List[Coordinate]): (List[Command], List[Coordinate]) =
       cameFrom.get(astarRoverState) match {
         case Some(oldRoverOnField) =>
-          //          println(s"${oldRoverOnField.direction} ${astarRoverState.direction} ${oldRoverOnField.direction.moveInstructions(astarRoverState.direction)}")
           iter(
             oldRoverOnField,
             oldRoverOnField.direction.moveInstructions(astarRoverState.direction) ++ acc,
@@ -326,13 +397,22 @@ case class Field(field: Vector[Vector[SquareArt]]) {
           )
         case None => (acc, acc2)
       }
-
+    // List[Coordinate] is there for debug purposes
     val z = iter(current, List[Command](), List[Coordinate]())
-    //    z._2.foreach(println)
     z._1
   }
 
+  /** A* search algorithm [[https://en.wikipedia.org/wiki/A*_search_algorithm]]
+   *
+   * Beware of mutable structures. Possible improvement would be cats-effect Priority queue and parallel node search.
+   *
+   * @param roverState initial rover state, coordinate and direction it's facing
+   * @param destinationCoordinate search destination
+   * @return Some list of [[Command]] to reach the destination. Or None if destination is unreachable.
+   */
   def astar(roverState: RoverState, destinationCoordinate: Coordinate): Option[List[Command]] = {
+
+    import scala.collection.mutable
 
     val initRoverState = AstarRoverState(
       roverState.coordinate,
@@ -387,7 +467,11 @@ case class Field(field: Vector[Vector[SquareArt]]) {
 }
 
 object Field {
-
+  /** Validates that field is rectangular in shape and bigger than 1 square.
+   *
+   * @param field squares tensor
+   * @return Try with squares tensor or Exception
+   */
   private def validateSize(field: Vector[Vector[SquareArt]]): Try[Vector[Vector[SquareArt]]] = {
     if (field.size > 1) {
       if (field.forall(_.size == field.head.size))
@@ -399,6 +483,11 @@ object Field {
     }
   }
 
+  /** Loads field from [[URL]]
+   *
+   * @param url project resource URL
+   * @return squares tensor wrapped in try with validation exception
+   */
   def fromUrl(url: URL): Try[Field] = {
     Using(Source.fromURL(url)) {
       _.getLines()
@@ -410,38 +499,20 @@ object Field {
   }
 }
 
-
-object RoverService {
-  def initialPosition(field: Field): Option[RoverService] = (for {
-    (row, y) <- field.field.zipWithIndex
-    (square, x) <- row.zipWithIndex
-    if square.isInstanceOf[WithDirection]
-  } yield square match {
-    case Rock => None
-    case Plain => None
-    case RoverTrace => None
-    case RoverNorth => Some(RoverState(Coordinate(x, y), North))
-    case RoverEast => Some(RoverState(Coordinate(x, y), East))
-    case RoverWest => Some(RoverState(Coordinate(x, y), West))
-    case RoverSouth => Some(RoverState(Coordinate(x, y), South))
-  })
-    .dropWhile(_.isEmpty)
-    .take(1)
-    .head
-    .map(new RoverService(_, field))
-}
-
-
+/** Issues commands to rover updating the [[Field]].
+ * Commands need to be chained, since [[Field.move]] will return new state after each command
+ *  {{{
+ *     roverService
+ *     .singleCommand(CounterClockRotate)
+ *     .singleCommand(CounterClockRotate)
+ *     .singleCommand(Forward)
+ *  }}}
+ *
+ * @param roverState currect rover state, coordinate and direction
+ * @param field squares tensor
+ */
 case class RoverService(roverState: RoverState, field: Field) {
-
-  @tailrec
-  private def runManyCommands(rs: RoverService, cmdLeft: List[Command]): RoverService = cmdLeft match {
-    case head :: cmds => runManyCommands(rs.flatMap(head), cmds)
-    case _ => rs
-  }
-
-  def flatMap(cmd: Command): RoverService = {
-
+  def singleCommand(cmd: Command): RoverService = {
     cmd match {
       case GoTo(coordinate) => field.astar(roverState, coordinate) match {
         case Some(commands) => runManyCommands(this, commands)
@@ -457,7 +528,17 @@ case class RoverService(roverState: RoverState, field: Field) {
     }
   }
 
-  def sendSimpleCommand(cmd: Command): Option[RoverState] = {
+  @tailrec
+  final def runManyCommands(rs: RoverService, cmdLeft: List[Command]): RoverService = cmdLeft match {
+    case head :: cmds => runManyCommands(rs.singleCommand(head), cmds)
+    case _ => rs
+  }
+
+  /**
+   * @param cmd rover command
+   * @return updated rover state and command execution
+   */
+  private def sendSimpleCommand(cmd: Command): Option[RoverState] = {
     println(cmd)
     cmd match {
       case Forward => roverState.direction match {
@@ -502,4 +583,29 @@ case class RoverService(roverState: RoverState, field: Field) {
   }
 }
 
+
+object RoverService {
+  /** Makes [[RoverService]] from the [[Field]], by finding rover on it.
+   *
+   * @param field square tensor
+   * @return Try wrapping [[RoverService]] if rover was found, otherwise exception
+   */
+  def initialPosition(field: Field): Option[RoverService] = (for {
+    (row, y) <- field.field.zipWithIndex
+    (square, x) <- row.zipWithIndex
+    if square.isInstanceOf[WithDirection]
+  } yield square match {
+    case Rock => None
+    case Plain => None
+    case RoverTrace => None
+    case RoverNorth => Some(RoverState(Coordinate(x, y), North))
+    case RoverEast => Some(RoverState(Coordinate(x, y), East))
+    case RoverWest => Some(RoverState(Coordinate(x, y), West))
+    case RoverSouth => Some(RoverState(Coordinate(x, y), South))
+  })
+    .dropWhile(_.isEmpty)
+    .take(1)
+    .head
+    .map(new RoverService(_, field))
+}
 

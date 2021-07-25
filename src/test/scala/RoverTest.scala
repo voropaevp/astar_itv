@@ -40,31 +40,31 @@ class RoverTest extends AnyFlatSpec with should.Matchers with RoverSpec {
 
   "Rover" should "go the 1,1" in {
     roverService2
-      .flatMap(Forward)
-      .flatMap(ClockRotate)
-      .flatMap(Forward)
+      .singleCommand(Forward)
+      .singleCommand(ClockRotate)
+      .singleCommand(Forward)
       .field.field should be(field2A22)
   }
 
   "Rover" should "go the 1,1 via portals" in {
     roverService2
-      .flatMap(CounterClockRotate)
-      .flatMap(CounterClockRotate)
-      .flatMap(Forward)
-      .flatMap(CounterClockRotate)
-      .flatMap(Forward)
+      .singleCommand(CounterClockRotate)
+      .singleCommand(CounterClockRotate)
+      .singleCommand(Forward)
+      .singleCommand(CounterClockRotate)
+      .singleCommand(Forward)
       .field.field should be(field2A22)
   }
 
   "Rover" should "not go over rocks" in {
     roverService10
-      .flatMap(Forward)
+      .singleCommand(Forward)
       .field.field should be(field10.field)
   }
 
   "Rover" should "find best path over north portal" in {
     val f = roverService10
-      .flatMap(GoTo(Coordinate(6, 6)))
+      .singleCommand(GoTo(Coordinate(6, 6)))
       .field
 
     f.field should be(field10A66.field)
@@ -72,7 +72,7 @@ class RoverTest extends AnyFlatSpec with should.Matchers with RoverSpec {
 
   "Rover" should "find best path on over both north and west portal" in {
     val f = roverService10
-      .flatMap(GoTo(Coordinate(9, 9)))
+      .singleCommand(GoTo(Coordinate(9, 9)))
       .field
 
     f.field should be(field10A99.field)
@@ -80,7 +80,7 @@ class RoverTest extends AnyFlatSpec with should.Matchers with RoverSpec {
 
   "Rover" should "not find path to unreachable location" in {
     val f = roverService10
-      .flatMap(GoTo(Coordinate(2, 7)))
+      .singleCommand(GoTo(Coordinate(2, 7)))
       .field
     f.field should be(field10.field)
   }
