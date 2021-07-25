@@ -235,7 +235,7 @@ case class Field(field: Vector[Vector[SquareArt]]) {
    * @param west - Going west will move rover to coordinate, None is for not commutable
    */
 
-  private final case class Neighbors(
+  final case class Neighbors(
                               north: Option[Coordinate],
                               south: Option[Coordinate],
                               east: Option[Coordinate],
@@ -266,7 +266,7 @@ case class Field(field: Vector[Vector[SquareArt]]) {
     }
   }
 
-  private object Neighbors {
+  object Neighbors {
     /** Factory for making neighbor nodes.
      *  Teleportation is handled here.
      *
