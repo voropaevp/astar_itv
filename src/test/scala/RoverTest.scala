@@ -12,8 +12,8 @@ trait RoverSpec {
   lazy val field10: Field = Field.fromUrl(getClass.getResource("/rocks_10x10_2x2.txt")).get
   lazy val roverService10: RoverService = RoverService.initialPosition(field10).get
 
-  lazy val field10A99: Field = Field.fromUrl(getClass.getResource("/rocks_10x10_2x2_9_9.txt")).get
-  lazy val field10A66: Field = Field.fromUrl(getClass.getResource("/rocks_10x10_2x2_6_6.txt")).get
+  lazy val field10A99: Field = Field.fromUrl(getClass.getResource("/rocks_10x10_2x2_9x9.txt")).get
+  lazy val field10A66: Field = Field.fromUrl(getClass.getResource("/rocks_10x10_2x2_6x6.txt")).get
 
 }
 
@@ -43,7 +43,7 @@ class RoverTest extends AnyFlatSpec with should.Matchers with RoverSpec {
       .singleCommand(Forward)
       .singleCommand(ClockRotate)
       .singleCommand(Forward)
-      .field.field should be(field2A22)
+      .field.field should be(field2A22.field)
   }
 
   "Rover" should "go the 1,1 via portals" in {
@@ -53,7 +53,7 @@ class RoverTest extends AnyFlatSpec with should.Matchers with RoverSpec {
       .singleCommand(Forward)
       .singleCommand(CounterClockRotate)
       .singleCommand(Forward)
-      .field.field should be(field2A22)
+      .field.field should be(field2A22.field)
   }
 
   "Rover" should "not go over rocks" in {

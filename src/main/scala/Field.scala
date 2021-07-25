@@ -235,7 +235,7 @@ case class Field(field: Vector[Vector[SquareArt]]) {
    * @param west - Going west will move rover to coordinate, None is for not commutable
    */
 
-  final case class Neighbors(
+  case class Neighbors(
                               north: Option[Coordinate],
                               south: Option[Coordinate],
                               east: Option[Coordinate],
